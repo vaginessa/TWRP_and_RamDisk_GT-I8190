@@ -1,0 +1,54 @@
+on init
+    mkdir /efs
+    mkdir /mnt
+    mkdir /mnt/.lfs
+    mkdir /sdcard
+    mkdir /external_sd
+
+    write /sys/devices/platform/ab8505-i2c.0/ab8500-usb.0/boot_time_device 1
+    write /sys/devices/platform/mcde_fb/graphics/fb0/bits_per_pixel 16
+
+on early-fs
+    insmod /lib/modules/j4fs.ko
+    mount j4fs /dev/block/mmcblk0p19 /mnt/.lfs wait rw
+    insmod /lib/modules/param.ko
+
+    # USB initialization
+on fs
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/idVendor 04E8
+    write /sys/class/android_usb/android0/idProduct 685D
+    write /sys/class/android_usb/android0/f_ffs/aliases adb
+    write /sys/class/android_usb/android0/functions mtp,adb
+    write /sys/class/android_usb/android0/iManufacturer ${ro.product.manufacturer}
+    write /sys/class/android_usb/android0/iProduct ${ro.product.model}
+    write /sys/class/android_usb/android0/iSerial ${ro.serialno}
+
+on property:sys.storage.ums_enabled=1
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/functions mass_storage,adb
+    write /sys/class/android_usb/android0/enable 1
+
+on property:sys.storage.ums_enabled=0
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/functions ${sys.usb.config}
+    write /sys/class/android_usb/android0/enable ${service.adb.root}
+
+on property:sys.usb.config=none
+    stop adbd
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/bDeviceClass 0
+
+on property:sys.usb.config=mtp,adb
+    stop adbd
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/functions mtp,adb
+    write /sys/class/android_usb/android0/enable 1
+    start adbd
+
+on property:sys.usb.config=adb
+    stop adbd
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/functions adb
+    write /sys/class/android_usb/android0/enable ${service.adb.root}
+    start adbd
