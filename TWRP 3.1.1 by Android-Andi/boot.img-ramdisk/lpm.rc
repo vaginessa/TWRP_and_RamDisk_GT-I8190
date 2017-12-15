@@ -1,0 +1,132 @@
+on early-init
+    start ueventd
+    write /sys/class/power_supply/battery/batt_lp_charging 1
+
+on init
+
+    export PATH /sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin
+    export LD_LIBRARY_PATH /vendor/lib:/system/lib
+    export ANDROID_ROOT /system
+    export ANDROID_DATA /data
+    export EXTERNAL_STORAGE /sdcard
+
+    symlink /system/etc /etc
+
+    mkdir /sdcard
+    mkdir /preload
+    mkdir /system
+    mkdir /modemfs 0771 system system
+    mkdir /data
+    mkdir /cache
+    mkdir /efs
+    mkdir /tmp
+    mkdir /dbdata
+    mkdir /mnt 0775 root root
+    mkdir /mnt/.lfs 0775 root root
+    #mount /tmp /tmp tmpfs   
+
+on early-fs
+	# loke4
+	mount ext4 /dev/block/mmcblk0p22 /system wait ro
+	# loke3
+	#mount ext4 /dev/block/mmcblk0p3 /system wait ro
+
+	# Start CSPSA before synchronously running the factory reset utility that
+	# checks the factory reset triggers in sysfs and CSPSA and then formats
+	# the block device belonging to /data.
+	start cspsa
+	exec /system/bin/logwrapper /system/bin/factoryreset -f /sys/socinfo/reset_reason -r factory-reset -c CSPSA0 -p 0xfffffffc:31 /dev/block/mmcblk0p25
+	
+	# loke4
+  	mount ext4 /dev/block/mmcblk0p12 /modemfs wait noatime nosuid nodev
+  	mount ext4 /dev/block/mmcblk0p23 /cache wait noatime nosuid nodev
+	mount ext4 /dev/block/mmcblk0p11 /efs wait noatime nosuid nodev
+	# loke3
+	#mount ext4 /dev/block/mmcblk0p2 /modemfs wait noatime nosuid nodev
+	#mount ext4 /dev/block/mmcblk0p4 /cache wait noatime nosuid nodev
+	#mount ext4 /dev/block/mmcblk0p7 /efs wait noatime nosuid nodev
+
+	mkdir /data/log 0777
+#	mkdir /data/anr 0777
+
+	chmod 0666 /dev/log/radio
+	chmod 0666 /dev/log/main
+	chmod 0666 /dev/log/event    
+
+on post-fs
+	# We need to decide j4fs's partition number(mmcblk0pX)
+	insmod /lib/modules/j4fs.ko
+ 	
+	# loke4
+	mount j4fs /dev/block/mmcblk0p19 /mnt/.lfs wait
+	# loke3
+	#mount j4fs /dev/block/mmcblk0p1 /mnt/.lfs wait
+	insmod /lib/modules/param.ko
+
+	# AB8500 Fuelgauge initialization using PARAM capacity
+	write /sys/class/power_supply/sec-fuelgauge/reinit_cap 1
+	write /sys/class/power_supply/battery/batt_reinit_capacity 1
+
+on boot
+#	write /sys/class/sec/switch/usb_sel PDA
+
+	ifup lo
+	hostname localhost
+	domainname localdomain
+
+	class_start modem-u8500
+	class_start modem-core
+	class_start default
+
+service debuggerd /system/bin/debuggerd
+
+	service ueventd /sbin/ueventd
+    	critical
+
+#service console /bin/sh
+service console /system/bin/sh
+	console
+
+# Crash Safe Parameter Storage Area, serving production parameter requests from clients.
+# Configuration is read from file "/etc/cspsa.conf" and each found area spawns a CSPSA server
+# process.
+service cspsa /system/bin/logwrapper /system/bin/cspsa-server
+    class parameter_storage
+    user root
+    oneshot
+
+#STE: Copy RF trim data from CSPSA, and start the Modem Stroage Agent (MSA) service
+service modem /system/bin/sh /system/etc/ste_modem.sh
+    class modem-u8500
+    user root
+
+#STE: Modem-supervisor
+service modem-supervisor /system/bin/modem-supervisor -r -f /dev/dbx500_mloader_fw -i /sys/devices/platform/ab8500-i2c.0/chip_id -c monitor -t 0
+    class modem-u8500
+    user root
+
+#STE: Creating Modem Security daemon
+service copsd /system/bin/copsdaemon
+    class modem-core
+    user root
+
+service playlpm /system/bin/playlpm
+    	user root
+
+service lpmkey /system/bin/lpmkey
+    	user root
+
+# adbd is controlled by the persist.service.adb.enable system property
+service adbd /sbin/adbd
+    disabled
+
+# adbd on at boot in emulator
+on property:ro.kernel.qemu=1
+    start adbd
+
+on property:persist.service.adb.enable=1
+    start adbd
+
+on property:persist.service.adb.enable=0
+    stop adbd
+

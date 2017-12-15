@@ -1,0 +1,11 @@
+# USB fix
+on init
+    write /sys/devices/platform/ab8505-i2c.0/ab8500-usb.0/boot_time_device 1
+
+# Load and configure modules
+on early-fs
+    mkdir /mnt
+    mkdir /mnt/.lfs
+    insmod /lib/modules/j4fs.ko
+    mount j4fs /dev/block/mmcblk0p19 /mnt/.lfs wait rw
+    insmod /lib/modules/param.ko

@@ -1,0 +1,70 @@
+on early-init
+    start ueventd
+
+on init
+    export PATH /sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin
+    export ANDROID_ROOT /system
+    export ANDROID_DATA /data
+    export EXTERNAL_STORAGE /sdcard
+
+    symlink /system/etc /etc
+
+    mkdir /sdcard
+    mkdir /sdcard1
+    mkdir /system
+    mkdir /data
+    mkdir /cache
+    mount /tmp /tmp tmpfs
+
+    write /sys/devices/platform/mcde_fb/graphics/fb0/bits_per_pixel 16
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/idVendor 04E8
+    write /sys/class/android_usb/android0/idProduct 685D
+    write /sys/class/android_usb/android0/bDeviceClass 0
+    write /sys/class/android_usb/android0/iManufacturer Samsung
+    write /sys/class/android_usb/android0/iProduct Android Phone
+    write /sys/class/android_usb/android0/functions adb
+    write /sys/class/android_usb/android0/enable 1
+    write /sys/devices/platform/ab8500-i2c.0/ab8500-usb.0/boot_time_device 1
+    write /sys/devices/platform/ab8505-i2c.0/ab8500-usb.0/boot_time_device 1    
+
+on early-fs
+
+    mount ext4 /dev/block/mmcblk0p3 /system noatime wait
+
+    mkdir /efs
+    mount ext4 /dev/block/mmcblk0p7 /efs nosuid nodev noatime wait
+
+# Install Kernel Module
+    # J4FS(lfs) mount points.
+    mkdir /mnt 0775 root root
+    mkdir /mnt/.lfs 0755 root root
+
+    insmod /lib/modules/j4fs.ko
+    # We need to decide j4fs's partition number(mmcblk0pX)
+    # loke4
+    mount j4fs /dev/block/mmcblk0p1 /mnt/.lfs wait
+
+    insmod /lib/modules/param.ko
+
+on boot
+
+    ifup lo
+    hostname localhost
+    domainname localdomain
+
+    class_start default
+    
+service ueventd /sbin/ueventd
+    critical
+
+service recovery /sbin/recovery
+
+service adbd /sbin/adbd recovery
+#    disabled
+
+on property:persist.service.adb.enable=1
+    start adbd
+
+#on property:persist.service.adb.enable=0
+#    stop adbd

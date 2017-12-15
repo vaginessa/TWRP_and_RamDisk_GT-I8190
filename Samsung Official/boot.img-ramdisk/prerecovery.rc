@@ -1,0 +1,140 @@
+on early-init
+    start ueventd
+
+on init
+    export PATH /sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin
+    export LD_LIBRARY_PATH /vendor/lib:/system/lib
+    export ANDROID_ROOT /system
+    export ANDROID_DATA /data
+    export EXTERNAL_STORAGE /sdcard
+
+    symlink /system/etc /etc
+
+    mkdir /sdcard
+    mkdir /preload
+    mkdir /system
+    mkdir /data
+    mkdir /cache
+    mkdir /efs
+    mkdir /tmp
+    mkdir /dbdata
+
+    mkdir /mnt 0775 root root
+    mkdir /mnt/.lfs 0775 root root
+
+    mkdir /system 0775 system system
+    mkdir /modemfs 0771 system system
+    mkdir /data 0771 system system
+
+    # STE: create /tmp directory needed by psccd and CSPSA
+    mkdir /tmp
+
+on early-fs
+
+    mount ext4 /dev/block/mmcblk0p22 /system wait ro
+    insmod /lib/modules/j4fs.ko
+    mount j4fs /dev/block/mmcblk0p19 /mnt/.lfs wait rw
+    insmod /lib/modules/param.ko
+
+on fs
+    mount tmpfs tmpfs /tmp
+
+    # Start CSPSA before synchronously running the factory reset utility that
+    # checks the factory reset triggers in sysfs and CSPSA and then formats
+    # the block device belonging to /data.
+    start cspsa
+    exec /system/bin/logwrapper /system/bin/factoryreset -f /sys/socinfo/reset_reason -r factory-reset -c CSPSA0 -p 0xfffffffc:31 /dev/block/mmcblk0p25
+
+    # Once any factory reset is completed (this is why exec is used above) it is
+    # OK to mount the remaining file system volumes.
+
+    mount ext4 /dev/block/mmcblk0p12 /modemfs wait noatime nosuid nodev
+    mount ext4 /dev/block/mmcblk0p25 /data wait noatime nosuid nodev noauto_da_alloc
+    mount ext4 /dev/block/mmcblk0p11 /efs wait noatime nosuid nodev
+
+    chmod 0666 /dev/log/radio
+    chmod 0666 /dev/log/main
+    chmod 0666 /dev/log/event
+
+on post-fs
+
+    chown system system /system
+    chmod 0775 /system
+
+    chown system system /modemfs
+    chmod 0775 /modemfs
+
+    chown radio system /efs
+    chmod 0775 /efs
+
+    chown system system /data
+    chmod 0771 /data
+    #temp
+    chmod 750 /sbin/fat.format
+    mount rootfs rootfs / ro remount
+
+    write /proc/sys/kernel/panic_on_oops 1
+    write /proc/sys/kernel/hung_task_timeout_secs 0
+    write /proc/cpu/alignment 4
+    write /proc/sys/kernel/sched_latency_ns 10000000
+    write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
+    write /proc/sys/kernel/sched_compat_yield 1
+    write /proc/sys/kernel/sched_child_runs_first 0
+
+on boot
+
+    ifup lo
+    hostname localhost
+    domainname localdomain
+
+    class_start modem-u8500
+    class_start modem-core
+    class_start default
+
+service ueventd /sbin/ueventd
+    critical
+
+service console /system/bin/sh
+    console
+
+# Crash Safe Parameter Storage Area, serving production parameter requests from clients.
+# Configuration is read from file "/etc/cspsa.conf" and each found area spawns a CSPSA server
+# process.
+service cspsa /system/bin/logwrapper /system/bin/cspsa-server
+    class parameter_storage
+    user root
+    oneshot
+
+#STE: Copy RF trim data from CSPSA, and start the Modem Stroage Agent (MSA) service
+service modem /system/bin/sh /system/etc/ste_modem.sh
+    class modem-u8500
+    user root
+
+#STE: Modem-supervisor
+service modem-supervisor /system/bin/modem-supervisor -r -f /dev/dbx500_mloader_fw -i /sys/devices/platform/ab8500-i2c.0/chip_id -c monitor -t 0
+    class modem-u8500
+    user root
+
+#STE: Creating Modem Security daemon
+service copsd /system/bin/copsdaemon
+    class modem-core
+    user root
+
+#TA Loader to write default IMEI
+service ta_load /system/bin/ta_loader recovery
+    user root
+    group radio
+    oneshot
+
+# block for prerecovery
+#service recovery /sbin/recovery
+
+service adbd /sbin/adbd recovery
+#    disabled
+
+on property:persist.service.adb.enable=1
+    start adbd
+
+#on property:persist.service.adb.enable=0
+#    stop adbd
+
